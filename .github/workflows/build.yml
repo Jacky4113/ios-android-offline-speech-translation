@@ -120,12 +120,13 @@ jobs:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO
-                  - name: Upload iOS app
+                 
+      - name: Upload iOS app
         uses: actions/upload-artifact@v4
         with:
-          name: VoicePing-iOS-app
-          path: build/DerivedData/Build/Products/Debug-iphoneos/*.app
-          if-no-files-found: error
+            name: VoicePing-iOS-app
+            path: build/DerivedData/Build/Products/Debug-iphoneos/*.app
+            if-no-files-found: error
 
   publish-release:
     name: Publish GitHub Release
