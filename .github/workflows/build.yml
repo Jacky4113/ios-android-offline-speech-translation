@@ -126,7 +126,21 @@ jobs:
         with:
             name: VoicePing-iOS-app
             path: build/DerivedData/Build/Products/Debug-iphoneos/*.app
-            if-no-files-found: error
+            if-no-files-found: error       
+            
+      - name: Package iOS IPA
+        run: |
+            mkdir -p build/Payload
+            cp -R build/DerivedData/Build/Products/Debug-iphoneos/*.app build/Payload/
+            cd build
+            zip -r VoicePing-iOS.ipa Payload
+
+      - name: Upload iOS IPA
+        uses: actions/upload-artifact@v4
+        with:
+           name: VoicePing-iOS-ipa
+           path: build/VoicePing-iOS.ipa
+           if-no-files-found: error
 
   publish-release:
     name: Publish GitHub Release
