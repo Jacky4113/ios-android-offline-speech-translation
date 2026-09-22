@@ -120,4 +120,39 @@ jobs:
             release-assets/OfflineTranscription-SideStore.ipa
           fail_on_unmatched_files: true
           overwrite_files: true
+            publish-release:
+    name: Publish Latest SideStore IPA
+    needs: ios-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: OfflineTranscription-SideStore-IPA
+          path: release-assets
+
+      - name: Publish latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: OfflineTranscription — Latest SideStore Build
+          body: |
+            # OfflineTranscription
+
+            ## 📱 SideStore IPA
+
+            Download the latest IPA below:
+
+            **OfflineTranscription-SideStore.ipa**
+
+            This IPA is unsigned and is intended to be imported into SideStore.
+          prerelease: true
+          make_latest: false
+          files: |
+            release-assets/OfflineTranscription-SideStore.ipa
+          fail_on_unmatched_files: true
+          overwrite_files: true
+          
 
