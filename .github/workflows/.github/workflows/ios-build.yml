@@ -1,0 +1,73 @@
+name: Build VoicePing iOS
+
+on:
+
+  workflow_dispatch:
+
+jobs:
+
+  build:
+
+    runs-on: macos-latest
+
+    steps:
+
+      - name: Checkout
+
+        uses: actions/checkout@v6
+
+        with:
+
+          submodules: recursive
+
+      - name: Show Xcode version
+
+        run: xcodebuild -version
+
+      - name: Setup dependencies
+
+        run: |
+
+          chmod +x scripts/setup-ios-deps.sh
+
+          ./scripts/setup-ios-deps.sh
+
+      - name: Generate Xcode project
+
+        run: |
+
+          chmod +x scripts/generate-ios-project.sh
+
+          ./scripts/generate-ios-project.sh
+
+      - name: Build
+
+        run: |
+
+          xcodebuild \
+
+            -project VoicePingIOSAndroidOfflineSpeechTranslation.xcodeproj \
+
+            -scheme OfflineTranscription \
+
+            -sdk iphoneos \
+
+            -configuration Debug \
+
+            CODE_SIGNING_ALLOWED=NO \
+
+            build \
+
+            | xcpretty
+
+      - name: Upload build
+
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: VoicePing-iOS-build
+
+          path: |
+
+            ~/Library/Developer/Xcode/DerivedData/**/Build/Products/Debug-iphoneos/
