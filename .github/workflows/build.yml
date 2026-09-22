@@ -1,117 +1,31 @@
 name: Build
-
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
-  android-build:
-    name: Android Build
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: gradle
-
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Run minimal unit test script
-        run: |
-          chmod +x ./scripts/ci-android-unit-test.sh
-          ./scripts/ci-android-unit-test.sh
-
-      - name: Build Android release binaries
-        working-directory: VoicePingIOSAndroidOfflineSpeechTranslationAndroid
-        run: |
-          chmod +x ./gradlew
-          ./gradlew --no-daemon assembleRelease bundleRelease
-
-      - name: Validate Android binaries
-        run: |
-          set -euo pipefail
-          shopt -s nullglob
-
-          files=(
-            VoicePingIOSAndroidOfflineSpeechTranslationAndroid/app/build/outputs/apk/debug/*.apk
-            VoicePingIOSAndroidOfflineSpeechTranslationAndroid/app/build/outputs/apk/release/*.apk
-            VoicePingIOSAndroidOfflineSpeechTranslationAndroid/app/build/outputs/bundle/release/*.aab
-          )
-
-          mkdir -p build
-          : > build/android-binaries.sha256
-
-          for f in "${files[@]}"; do
-            [ -s "$f" ] || { echo "Missing or empty binary: $f" >&2; exit 1; }
-            unzip -t "$f" >/dev/null
-            sha256sum "$f" | tee -a build/android-binaries.sha256
-          done
-
-      - name: Upload debug APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-debug-apk
-          path: VoicePingIOSAndroidOfflineSpeechTranslationAndroid/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
-
-      - name: Upload release APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release-apk
-          path: VoicePingIOSAndroidOfflineSpeechTranslationAndroid/app/build/outputs/apk/release/*.apk
-          if-no-files-found: error
-
-      - name: Upload release AAB artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-release-aab
-          path: VoicePingIOSAndroidOfflineSpeechTranslationAndroid/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: error
-
-      - name: Upload Android checksum artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-binaries-checksums
-          path: build/android-binaries.sha256
-          if-no-files-found: error
-
   ios-build:
-    name: iOS Build
+    name: Build iOS IPA for SideStore
     runs-on: macos-15
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
       - name: Install XcodeGen
         run: brew install xcodegen
-
       - name: Download iOS binary dependencies
         run: |
           chmod +x ./scripts/setup-ios-deps.sh
           ./scripts/setup-ios-deps.sh
-
       - name: Generate Xcode project
         run: xcodegen generate
-
-      - name: Build iOS app
+      - name: Build unsigned iOS app
         run: |
+          set -euo pipefail
           xcodebuild build \
             -project VoicePingIOSAndroidOfflineSpeechTranslation.xcodeproj \
             -scheme OfflineTranscription \
@@ -119,73 +33,91 @@ jobs:
             -configuration Debug \
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             ONLY_ACTIVE_ARCH=NO
-                 
-      - name: Upload iOS app
-        uses: actions/upload-artifact@v4
-        with:
-            name: VoicePing-iOS-app
-            path: build/DerivedData/Build/Products/Debug-iphoneos/*.app
-            if-no-files-found: error       
-            
-      - name: Package iOS IPA
+      - name: Find built app
         run: |
-            mkdir -p build/Payload
-            cp -R build/DerivedData/Build/Products/Debug-iphoneos/*.app build/Payload/
-            cd build
-            zip -r VoicePing-iOS.ipa Payload
-
-      - name: Upload iOS IPA
+          set -euo pipefail
+          APP_PATH=$(find build/DerivedData/Build/Products \
+            -type d \
+            -name "*.app" \
+            -not -path "*/Index.noindex/*" \
+            | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: No .app was produced."
+            find build/DerivedData/Build/Products -maxdepth 5 -print || true
+            exit 1
+          fi
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+      - name: Create SideStore IPA
+        run: |
+          set -euo pipefail
+          rm -rf build/ios
+          mkdir -p build/ios/Payload
+          APP_NAME="$(basename "$APP_PATH")"
+          ditto "$APP_PATH" "build/ios/Payload/$APP_NAME"
+          cd build/ios
+          zip -qry \
+            OfflineTranscription-SideStore.ipa \
+            Payload
+          rm -rf Payload
+          echo "IPA created:"
+          ls -lh OfflineTranscription-SideStore.ipa
+          echo "IPA contents:"
+          unzip -l OfflineTranscription-SideStore.ipa
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
-           name: VoicePing-iOS-ipa
-           path: build/VoicePing-iOS.ipa
-           if-no-files-found: error
-
+          name: OfflineTranscription-SideStore-IPA
+          path: build/ios/OfflineTranscription-SideStore.ipa
+          if-no-files-found: error
+          retention-days: 30
   publish-release:
     name: Publish GitHub Release
-    needs:
-      - android-build
-      - ios-build
+    needs: ios-build
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-
     steps:
-      - name: Download Android debug APK artifact
+      - name: Download IPA
         uses: actions/download-artifact@v4
         with:
-          name: android-debug-apk
-          path: release-assets/android
-
-      - name: Download Android release APK artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: android-release-apk
-          path: release-assets/android
-
-      - name: Download Android release AAB artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: android-release-aab
-          path: release-assets/android
-
-      - name: Download Android checksum artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: android-binaries-checksums
-          path: release-assets/android
-
-      - name: Publish GitHub release assets
+          name: OfflineTranscription-SideStore-IPA
+          path: release-assets
+      - name: Create release notes
+        run: |
+          cat > release-assets/RELEASE.md <<'EOF'
+          # OfflineTranscription — SideStore
+          ## Install with SideStore
+          1. Open this release on your iPhone.
+          2. Tap **OfflineTranscription-SideStore.ipa** under Assets.
+          3. Download the IPA.
+          4. Open it with SideStore.
+          5. Allow SideStore to sign and install the app with your Apple ID.
+          **Important:** This IPA is unsigned. SideStore is responsible for signing it before installation.
+          ## IPA
+          **OfflineTranscription-SideStore.ipa**
+          EOF
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.sha }}
-          name: Build ${{ github.sha }}
+          name: OfflineTranscription — SideStore
+          body: |
+            ## 📱 OfflineTranscription for SideStore
+            Download the IPA below and open it with SideStore.
+            ### 👉 IPA
+            **OfflineTranscription-SideStore.ipa**
+            ### Installation
+            1. Download the IPA on your iPhone.
+            2. Open/share it to SideStore.
+            3. SideStore signs it using your Apple ID.
+            4. Install the app.
+            This GitHub build is unsigned; SideStore performs the signing.
           prerelease: true
-          generate_release_notes: true
+          generate_release_notes: false
           files: |
-            release-assets/android/*.apk
-            release-assets/android/*.aab
-            release-assets/android/*.sha256
+            release-assets/OfflineTranscription-SideStore.ipa
           fail_on_unmatched_files: true
           overwrite_files: true
 
